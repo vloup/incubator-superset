@@ -17,6 +17,8 @@ import yaml
 
 from superset import app, db, dict_import_export_util, security, utils
 
+from OpenSSL import SSL
+
 config = app.config
 celery_app = utils.get_celery_app(config)
 
@@ -58,6 +60,7 @@ def init():
 def runserver(debug, no_reload, address, port, timeout, workers, socket):
     """Starts a Superset web server."""
     debug = debug or config.get('DEBUG')
+    useSSL = config.get('SUPERSET_ENABLE_SSL')
     if debug:
         print(Fore.BLUE + '-=' * 20)
         print(
@@ -66,22 +69,46 @@ def runserver(debug, no_reload, address, port, timeout, workers, socket):
             Fore.YELLOW + ' mode')
         print(Fore.BLUE + '-=' * 20)
         print(Style.RESET_ALL)
-        app.run(
-            host='0.0.0.0',
-            port=int(port),
-            threaded=True,
-            debug=True,
-            use_reloader=no_reload)
+        if useSSL:
+            sslContext = SSL.Context(SSL.PROTOCOL_TLSv1_2)
+            sslContext.use_privatekey_file(config.get('SUPERSET_SSL_KEY_FILE'))
+            sslContext.use_certificate_file(config.get('SUPERSET_SSL_CERT_FILE'))
+            app.run(
+                host='0.0.0.0',
+                port=int(port),
+                threaded=True,
+                debug=True,
+                use_reloader=no_reload,
+                ssl_context=sslContext)
+        else:
+            app.run(
+                host='0.0.0.0',
+                port=int(port),
+                threaded=True,
+                debug=True,
+                use_reloader=no_reload)
     else:
         addr_str = ' unix:{socket} ' if socket else' {address}:{port} '
-        cmd = (
-            'gunicorn '
-            '-w {workers} '
-            '--timeout {timeout} '
-            '-b ' + addr_str +
-            '--limit-request-line 0 '
-            '--limit-request-field_size 0 '
-            'superset:app').format(**locals())
+        if useSSL:
+            cmd = (
+                'gunicorn '
+                '-w {workers} '
+                '--timeout {timeout} '
+                '-b ' + addr_str +
+                '--limit-request-line 0 '
+                '--limit-request-field_size 0 '
+                '--keyfile ' + config.get('SUPERSET_SSL_KEY_FILE') + ' '
+                '--certfile ' + config.get('SUPERSET_SSL_CERT_FILE') + ' '
+                'superset:app').format(**locals())
+        else:
+            cmd = (
+                'gunicorn '
+                '-w {workers} '
+                '--timeout {timeout} '
+                '-b ' + addr_str +
+                '--limit-request-line 0 '
+                '--limit-request-field_size 0 '
+                'superset:app').format(**locals())
         print(Fore.GREEN + 'Starting server with command: ')
         print(Fore.YELLOW + cmd)
         print(Style.RESET_ALL)
